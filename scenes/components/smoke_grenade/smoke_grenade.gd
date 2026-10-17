@@ -5,13 +5,10 @@ class_name Smoke
 @export var cell_size: float = 0.3
 @export var gap: float = 0.1
 @export var radius: float = 3.0
-## Part du volume manquant (sphère coupée par un mur) recréée dans les coins mur/sol
 @export_range(0.0, 2.0) var overflow_ratio: float = 1.0
-## Distance max au-delà du radius maximum (0 = les extras restent dans radius + variation)
 @export var max_extra_reach: float = 0.0
 
 @export_group("Mouvement")
-## Le radius varie de (radius - variation) à (radius + variation) : 3 -> entre 2.8 et 3.2
 @export var variation: float = 0.2
 @export var variation_speed: float = 1.2
 
@@ -30,7 +27,6 @@ class_name Smoke
 @export var debug: bool = false
 @export var particles: GPUParticles3D
 @export var particle_update_interval: float = 0.1
-## Nombre de particules émises en parallèle par cube (chaque cube = un émetteur)
 @export var particles_per_cell: int = 4
 
 enum State { IDLE, GROWING, HOLDING, FADING }
@@ -45,7 +41,6 @@ var _state: State = State.IDLE
 var _time: float = 0.0
 var _life_time: float = 0.0
 
-# Liste unique triée par "clé" (distance effective). Les extras ont la clé d'un cube manquant de la sphère.
 var _positions: PackedVector3Array = PackedVector3Array()
 var _keys: PackedFloat32Array = PackedFloat32Array()
 var _count: int = 0
@@ -55,7 +50,6 @@ var _particle_mat: ParticleProcessMaterial
 var _particle_timer: float = 0.0
 var _last_n: int = -1
 
-# --- données temporaires du calcul ---
 var _space: PhysicsDirectSpaceState3D
 var _origin: Vector3
 var _rmax: float
@@ -76,7 +70,7 @@ var _step: float:
 
 func _ready() -> void:
 	if particles:
-		particles.visible = true # souvent masqué dans l'éditeur : on force la visibilité
+		particles.visible = true
 		particles.emitting = false
 
 
@@ -94,7 +88,6 @@ func start() -> void:
 	_count = _positions.size()
 
 	if debug:
-		# Mode debug : cubes uniquement, aucune particule
 		_mmi = _make_multimesh()
 		if particles:
 			particles.emitting = false
@@ -107,8 +100,6 @@ func start() -> void:
 	_particle_timer = particle_update_interval
 	_state = State.GROWING
 
-
-# ---------------------------------------------------------------- calcul des cellules
 
 func _compute_cells() -> bool:
 	_space = get_world_3d().direct_space_state
@@ -147,7 +138,6 @@ func _compute_cells() -> bool:
 	_hv.clear()
 	_phase2 = false
 
-	# Sphère parfaite : distances de toutes les cellules
 	var all_dists := PackedFloat32Array()
 	var n_max := int(ceil(_rmax / _step))
 	for x in range(-n_max, n_max + 1):
@@ -161,7 +151,6 @@ func _compute_cells() -> bool:
 	if not _free(Vector3i.ZERO):
 		return false
 
-	# Phase 1 : flood fill dans la sphère
 	var sphere: Array[Vector3i] = []
 	_queue.append(Vector3i.ZERO)
 	_visited[Vector3i.ZERO] = true
@@ -174,7 +163,6 @@ func _compute_cells() -> bool:
 
 	sphere.sort_custom(func(a: Vector3i, b: Vector3i): return Vector3(a).length_squared() < Vector3(b).length_squared())
 
-	# Distances des cubes de la sphère qui ont été supprimés par les murs
 	var sphere_dists := PackedFloat32Array()
 	for c in sphere:
 		sphere_dists.append(Vector3(c).length() * _step)
@@ -188,7 +176,6 @@ func _compute_cells() -> bool:
 		else:
 			missing_dists.append(d)
 
-	# Phase 2 : cubes en plus, uniquement dans les coins (concavités) entre parois
 	var budget := int(round(missing_dists.size() * overflow_ratio))
 	var reach_max := _rmax + max_extra_reach
 	var extras: Array[Vector3i] = []
@@ -198,12 +185,11 @@ func _compute_cells() -> bool:
 		if Vector3(c).length() * _step > reach_max:
 			continue
 		if not _is_corner(c):
-			continue # surface plate (sol ou mur seul) : on ignore
+			continue
 		extras.append(c)
 		budget -= 1
 		_explore(c)
 
-	# Liste unique : chaque extra prend la clé d'un cube manquant (du plus petit au plus grand)
 	var all_cells: Array[Vector4] = []
 	for c in sphere:
 		var p := Vector3(c) * _step
@@ -287,8 +273,6 @@ func _wall_between(a: Vector3i, b: Vector3i) -> bool:
 	return not _space.intersect_ray(_ray_q).is_empty()
 
 
-## Une cellule est dans un coin si des obstacles la bloquent sur au moins 2 axes différents
-## (ex. sol en Y + mur en X). Utilise les mêmes raycasts / shape queries que le reste du calcul.
 func _is_corner(c: Vector3i) -> bool:
 	var blocked_axes := 0
 	for axis in 3:
@@ -304,8 +288,6 @@ func _is_corner(c: Vector3i) -> bool:
 			blocked_axes += 1
 	return blocked_axes >= 2
 
-
-# ---------------------------------------------------------------- tas binaire
 
 func _hpush(k: float, v: Vector3i) -> void:
 	_hk.append(k)
@@ -345,8 +327,6 @@ func _hpop() -> Vector3i:
 	return top
 
 
-# ---------------------------------------------------------------- rendu : cubes (debug)
-
 func _make_multimesh() -> MultiMeshInstance3D:
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3.ONE * cell_size
@@ -371,8 +351,6 @@ func _make_multimesh() -> MultiMeshInstance3D:
 	return inst
 
 
-# ---------------------------------------------------------------- rendu : ton emitter
-
 func _start_particles() -> void:
 	if particles == null:
 		return
@@ -387,11 +365,9 @@ func _start_particles() -> void:
 		particles.process_material = _particle_mat
 	_particle_mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_POINTS
 
-	# Émission continue : pas de one_shot, pas de bursts, particules réparties dans le temps
 	particles.visible = true
 	particles.one_shot = false
 	particles.explosiveness = 0.0
-	# Chaque cube est un émetteur : le budget de particules est proportionnel au nombre de cubes
 	particles.amount = maxi(_positions.size() * maxi(particles_per_cell, 1), 1)
 	particles.top_level = true
 	particles.local_coords = true
@@ -420,15 +396,12 @@ func _update_particle_points(n: int) -> void:
 	var img := Image.create_from_data(w, h, false, Image.FORMAT_RGBF, floats.to_byte_array())
 	_particle_mat.emission_point_texture = ImageTexture.create_from_image(img)
 	_particle_mat.emission_point_count = n
-	# Garde la densité par cube constante quand le radius varie
 	particles.amount_ratio = clampf(float(n) / float(maxi(_positions.size(), 1)), 0.0, 1.0)
 
 
-# ---------------------------------------------------------------- radius vivant
-
 func _live_radius() -> float:
 	var t := _life_time * variation_speed
-	var s := (sin(t * 1.7) + sin(t * 2.9 + 1.3)) * 0.5   # [-1, 1]
+	var s := (sin(t * 1.7) + sin(t * 2.9 + 1.3)) * 0.5
 	return radius + variation * s
 
 
@@ -458,8 +431,6 @@ func _apply_radius(r: float, delta: float) -> void:
 			_last_n = n
 			_update_particle_points(n)
 
-
-# ---------------------------------------------------------------- boucle
 
 func _process(delta: float) -> void:
 	if _state == State.IDLE:
