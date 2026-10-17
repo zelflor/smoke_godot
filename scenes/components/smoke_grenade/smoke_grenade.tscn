@@ -1,0 +1,116 @@
+[gd_scene format=3 uid="uid://btjukcnivtv3k"]
+
+[ext_resource type="Script" uid="uid://qob4vdo8por3" path="res://scenes/components/smoke_grenade/smoke_grenade.gd" id="1_yadrp"]
+[ext_resource type="Texture2D" uid="uid://cmc0ipr506r8d" path="res://assets/particule.png" id="2_xil7h"]
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_12j5o"]
+angle_min = -720.0
+angle_max = 720.0
+initial_velocity_max = 0.5
+angular_velocity_min = -720.0
+angular_velocity_max = 719.99994
+orbit_velocity_min = -2.0
+orbit_velocity_max = 2.0000002
+radial_velocity_min = -2.2351742e-05
+radial_velocity_max = 0.19997764
+gravity = Vector3(0, 0, 0)
+tangential_accel_min = -2.2351742e-06
+tangential_accel_max = 0.99999774
+
+[sub_resource type="Shader" id="Shader_xil7h"]
+code = "shader_type spatial;
+render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
+// \"unshaded\" retiré pour recevoir la lumière
+
+uniform vec4 albedo : source_color = vec4(1.0);
+uniform sampler2D texture_albedo : source_color, filter_linear_mipmap, repeat_enable;
+uniform float alpha_scissor_threshold : hint_range(0.0, 1.0, 0.001) = 0.5;
+uniform ivec2 albedo_texture_size;
+uniform float point_size : hint_range(0.1, 128.0, 0.1);
+
+uniform float roughness : hint_range(0.0, 1.0) = 1.0;
+uniform sampler2D texture_metallic : hint_default_white, filter_linear_mipmap, repeat_enable;
+uniform vec4 metallic_texture_channel;
+uniform sampler2D texture_roughness : hint_roughness_r, filter_linear_mipmap, repeat_enable;
+
+uniform float specular : hint_range(0.0, 1.0, 0.01) = 0.0;
+uniform float metallic : hint_range(0.0, 1.0, 0.01) = 0.0;
+
+uniform vec3 uv1_scale = vec3(1.0);
+uniform vec3 uv1_offset = vec3(0.0);
+uniform vec3 uv2_scale = vec3(1.0);
+uniform vec3 uv2_offset = vec3(0.0);
+
+// Direction de la normale en espace MONDE (fixe, indépendante du billboard).
+// (0,1,0) = éclairé comme une surface qui regarde vers le haut :
+// l'éclairage vient surtout du dessus, comme un sol/une herbe.
+uniform vec3 world_normal = vec3(0.0, 1.0, 0.0);
+// 0 = normale fixe monde, 1 = normale d'origine du billboard
+uniform float normal_blend : hint_range(0.0, 1.0) = 0.0;
+
+void vertex() {
+	UV = UV * uv1_scale.xy + uv1_offset.xy;
+
+	// Billboard Mode: Enabled
+	MODELVIEW_MATRIX = VIEW_MATRIX * mat4(
+			MAIN_CAM_INV_VIEW_MATRIX[0],
+			MAIN_CAM_INV_VIEW_MATRIX[1],
+			MAIN_CAM_INV_VIEW_MATRIX[2],
+			MODEL_MATRIX[3]);
+	MODELVIEW_NORMAL_MATRIX = mat3(MODELVIEW_MATRIX);
+
+	// Normale fixe en espace monde -> espace vue
+	vec3 fixed_normal = normalize((VIEW_MATRIX * vec4(normalize(world_normal), 0.0)).xyz);
+	NORMAL = normalize(mix(fixed_normal, NORMAL, normal_blend));
+}
+
+void fragment() {
+	vec2 base_uv = UV;
+
+	vec4 albedo_tex = texture(texture_albedo, base_uv);
+	ALBEDO = albedo.rgb * albedo_tex.rgb;
+
+	float metallic_tex = dot(texture(texture_metallic, base_uv), metallic_texture_channel);
+	METALLIC = metallic_tex * metallic;
+	SPECULAR = specular;
+
+	vec4 roughness_texture_channel = vec4(1.0, 0.0, 0.0, 0.0);
+	float roughness_tex = dot(texture(texture_roughness, base_uv), roughness_texture_channel);
+	ROUGHNESS = roughness_tex * roughness;
+
+	ALPHA *= albedo.a * albedo_tex.a;
+	ALPHA_SCISSOR_THRESHOLD = alpha_scissor_threshold;
+}"
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_nx4bf"]
+render_priority = 0
+shader = SubResource("Shader_xil7h")
+shader_parameter/albedo = Color(0.728822, 0.728822, 0.728822, 1)
+shader_parameter/texture_albedo = ExtResource("2_xil7h")
+shader_parameter/alpha_scissor_threshold = 0.121
+shader_parameter/albedo_texture_size = Vector2i(128, 128)
+shader_parameter/point_size = 1.0
+shader_parameter/roughness = 1.0
+shader_parameter/metallic_texture_channel = Vector4(1, 0, 0, 0)
+shader_parameter/specular = 0.5
+shader_parameter/metallic = 0.0
+shader_parameter/uv1_scale = Vector3(1, 1, 1)
+shader_parameter/uv1_offset = Vector3(0, 0, 0)
+shader_parameter/uv2_scale = Vector3(1, 1, 1)
+shader_parameter/uv2_offset = Vector3(0, 0, 0)
+shader_parameter/world_normal = Vector3(0, 1, 0)
+shader_parameter/normal_blend = 0.0
+
+[sub_resource type="QuadMesh" id="QuadMesh_pohj0"]
+material = SubResource("ShaderMaterial_nx4bf")
+
+[node name="SmokeGrenade" type="Node3D" unique_id=1201955485 node_paths=PackedStringArray("particles")]
+script = ExtResource("1_yadrp")
+debug = true
+particles = NodePath("GPUParticles3D")
+
+[node name="GPUParticles3D" type="GPUParticles3D" parent="." unique_id=1218291174]
+transform = Transform3D(-4.371139e-08, -1, 0, 1, -4.371139e-08, 0, 0, 0, 1, 0, 0, 0)
+sub_emitter = NodePath(".")
+process_material = SubResource("ParticleProcessMaterial_12j5o")
+draw_pass_1 = SubResource("QuadMesh_pohj0")

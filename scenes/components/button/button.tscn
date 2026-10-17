@@ -1,0 +1,32 @@
+[gd_scene format=3 uid="uid://c8h0t5ssrwcl5"]
+
+[ext_resource type="Script" uid="uid://d16il2g6ouujv" path="res://scenes/components/button/button.gd" id="1_mmcb7"]
+[ext_resource type="Material" uid="uid://cie6x7f0ldfea" path="res://debugs/dev_mesure_default_material.tres" id="2_mmcb7"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_12j5o"]
+height = 1.1767578
+radius = 0.25
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_61ot5"]
+top_radius = 0.25
+bottom_radius = 0.25
+height = 1.0
+
+[node name="Button" type="StaticBody3D" unique_id=1978381573]
+script = ExtResource("1_mmcb7")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1784020431]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.088378906, 0)
+shape = SubResource("CylinderShape3D_12j5o")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=2037597441]
+material_override = ExtResource("2_mmcb7")
+mesh = SubResource("CylinderMesh_61ot5")
+
+[node name="Label3D" type="Label3D" parent="." unique_id=529978373]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.68545866, 0)
+billboard = 2
+alpha_cut = 1
+text = "Press E"
+font_size = 25
+outline_size = 8

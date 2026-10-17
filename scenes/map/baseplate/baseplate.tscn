@@ -1,0 +1,61 @@
+[gd_scene format=3 uid="uid://crjs54avvmw4c"]
+
+[ext_resource type="Material" uid="uid://cie6x7f0ldfea" path="res://debugs/dev_mesure_default_material.tres" id="1_e3cqm"]
+[ext_resource type="Material" uid="uid://buoi834ddna80" path="res://debugs/dev_clip_default_material.tres" id="2_a60dt"]
+[ext_resource type="PackedScene" uid="uid://c8h0t5ssrwcl5" path="res://scenes/components/button/button.tscn" id="2_sfnwm"]
+[ext_resource type="PackedScene" uid="uid://btjukcnivtv3k" path="res://scenes/components/smoke_grenade/smoke_grenade.tscn" id="3_7jies"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_e3cqm"]
+sky_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
+ground_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
+
+[sub_resource type="Sky" id="Sky_sfnwm"]
+sky_material = SubResource("ProceduralSkyMaterial_e3cqm")
+
+[sub_resource type="Environment" id="Environment_7jies"]
+background_mode = 2
+sky = SubResource("Sky_sfnwm")
+glow_enabled = true
+
+[node name="Baseplate" type="Node3D" unique_id=17243473]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1916217712]
+transform = Transform3D(-0.8660254, -0.43301278, 0.25, 0, 0.49999997, 0.86602545, -0.50000006, 0.75, -0.43301266, 0, 0, 0)
+shadow_enabled = true
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=2119524767]
+environment = SubResource("Environment_7jies")
+
+[node name="CSGCombiner3D" type="CSGCombiner3D" parent="." unique_id=1154045712]
+use_collision = true
+
+[node name="CSGBox3D" type="CSGBox3D" parent="CSGCombiner3D" unique_id=792970944]
+size = Vector3(30, 1, 30)
+material = ExtResource("1_e3cqm")
+
+[node name="CSGBox3D2" type="CSGBox3D" parent="CSGCombiner3D" unique_id=1489374070]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11.5, 3, -1.5)
+size = Vector3(7, 7, 1)
+material = ExtResource("2_a60dt")
+
+[node name="Button" parent="." unique_id=1978381573 node_paths=PackedStringArray("target_node") instance=ExtResource("2_sfnwm")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 1, 0)
+target_node = NodePath("../SmokeGrenade")
+
+[node name="Button3" parent="." unique_id=2007682281 node_paths=PackedStringArray("target_node") instance=ExtResource("2_sfnwm")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 1, -1)
+target_node = NodePath("../SmokeGrenade3")
+
+[node name="Button2" parent="." unique_id=2725662 node_paths=PackedStringArray("target_node") instance=ExtResource("2_sfnwm")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 1, 5)
+target_node = NodePath("../SmokeGrenade2")
+
+[node name="SmokeGrenade" parent="." unique_id=1201955485 instance=ExtResource("3_7jies")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9.702091, 1.5999998, 0.091469765)
+
+[node name="SmokeGrenade3" parent="." unique_id=1019158644 instance=ExtResource("3_7jies")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9.702091, 1.5999998, 0.091469765)
+debug = false
+
+[node name="SmokeGrenade2" parent="." unique_id=1479440279 instance=ExtResource("3_7jies")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9.702091, 1.5999998, 6.09147)

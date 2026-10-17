@@ -1,0 +1,11 @@
+[gd_scene format=3 uid="uid://cvpa7e1lso10w"]
+
+[ext_resource type="PackedScene" uid="uid://c5q2pwrrxgb3m" path="res://scenes/components/player/player.tscn" id="1_qbwvd"]
+[ext_resource type="PackedScene" uid="uid://crjs54avvmw4c" path="res://scenes/map/baseplate/baseplate.tscn" id="2_i4801"]
+
+[node name="App" type="Node3D" unique_id=1601905853]
+
+[node name="Player" parent="." unique_id=183358913 instance=ExtResource("1_qbwvd")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.52642787, 2, -0.166543)
+
+[node name="Baseplate" parent="." unique_id=17243473 instance=ExtResource("2_i4801")]
