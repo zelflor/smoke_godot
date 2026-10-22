@@ -19,12 +19,11 @@ tangential_accel_max = 0.99999774
 
 [sub_resource type="Shader" id="Shader_xil7h"]
 code = "shader_type spatial;
-render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
+render_mode blend_mix, depth_prepass_alpha, cull_disabled, diffuse_burley, specular_schlick_ggx;
 // \"unshaded\" retiré pour recevoir la lumière
 
 uniform vec4 albedo : source_color = vec4(1.0);
 uniform sampler2D texture_albedo : source_color, filter_linear_mipmap, repeat_enable;
-uniform float alpha_scissor_threshold : hint_range(0.0, 1.0, 0.001) = 0.5;
 uniform ivec2 albedo_texture_size;
 uniform float point_size : hint_range(0.1, 128.0, 0.1);
 
@@ -41,12 +40,12 @@ uniform vec3 uv1_offset = vec3(0.0);
 uniform vec3 uv2_scale = vec3(1.0);
 uniform vec3 uv2_offset = vec3(0.0);
 
-// Direction de la normale en espace MONDE (fixe, indépendante du billboard).
-// (0,1,0) = éclairé comme une surface qui regarde vers le haut :
-// l'éclairage vient surtout du dessus, comme un sol/une herbe.
 uniform vec3 world_normal = vec3(0.0, 1.0, 0.0);
-// 0 = normale fixe monde, 1 = normale d'origine du billboard
 uniform float normal_blend : hint_range(0.0, 1.0) = 0.0;
+
+// Seuil minimal pour ignorer les pixels totalement invisibles
+// (évite d'écrire de la profondeur / des artefacts de tri inutiles)
+uniform float alpha_discard_min : hint_range(0.0, 0.1, 0.001) = 0.01;
 
 void vertex() {
 	UV = UV * uv1_scale.xy + uv1_offset.xy;
@@ -59,7 +58,6 @@ void vertex() {
 			MODEL_MATRIX[3]);
 	MODELVIEW_NORMAL_MATRIX = mat3(MODELVIEW_MATRIX);
 
-	// Normale fixe en espace monde -> espace vue
 	vec3 fixed_normal = normalize((VIEW_MATRIX * vec4(normalize(world_normal), 0.0)).xyz);
 	NORMAL = normalize(mix(fixed_normal, NORMAL, normal_blend));
 }
@@ -78,8 +76,13 @@ void fragment() {
 	float roughness_tex = dot(texture(texture_roughness, base_uv), roughness_texture_channel);
 	ROUGHNESS = roughness_tex * roughness;
 
-	ALPHA *= albedo.a * albedo_tex.a;
-	ALPHA_SCISSOR_THRESHOLD = alpha_scissor_threshold;
+	// Transparence progressive (blend) au lieu d'une découpe
+	ALPHA = albedo.a * albedo_tex.a;
+
+	// On écarte seulement les pixels quasi invisibles
+	if (ALPHA < alpha_discard_min) {
+		discard;
+	}
 }"
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_nx4bf"]
@@ -87,7 +90,6 @@ render_priority = 0
 shader = SubResource("Shader_xil7h")
 shader_parameter/albedo = Color(0.728822, 0.728822, 0.728822, 1)
 shader_parameter/texture_albedo = ExtResource("2_xil7h")
-shader_parameter/alpha_scissor_threshold = 0.121
 shader_parameter/albedo_texture_size = Vector2i(128, 128)
 shader_parameter/point_size = 1.0
 shader_parameter/roughness = 1.0
@@ -100,9 +102,11 @@ shader_parameter/uv2_scale = Vector3(1, 1, 1)
 shader_parameter/uv2_offset = Vector3(0, 0, 0)
 shader_parameter/world_normal = Vector3(0, 1, 0)
 shader_parameter/normal_blend = 0.0
+shader_parameter/alpha_discard_min = 0.01
 
 [sub_resource type="QuadMesh" id="QuadMesh_pohj0"]
 material = SubResource("ShaderMaterial_nx4bf")
+size = Vector2(1.5, 1.5)
 
 [node name="SmokeGrenade" type="Node3D" unique_id=1201955485 node_paths=PackedStringArray("particles")]
 script = ExtResource("1_yadrp")
@@ -111,6 +115,7 @@ particles = NodePath("GPUParticles3D")
 
 [node name="GPUParticles3D" type="GPUParticles3D" parent="." unique_id=1218291174]
 transform = Transform3D(-4.371139e-08, -1, 0, 1, -4.371139e-08, 0, 0, 0, 1, 0, 0, 0)
+amount = 2
 sub_emitter = NodePath(".")
 process_material = SubResource("ParticleProcessMaterial_12j5o")
 draw_pass_1 = SubResource("QuadMesh_pohj0")

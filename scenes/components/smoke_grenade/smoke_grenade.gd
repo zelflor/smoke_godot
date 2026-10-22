@@ -1,18 +1,19 @@
 extends Node3D
 class_name Smoke
 
-@export_group("Forme")
+@export_group("Shape")
 @export var cell_size: float = 0.3
 @export var gap: float = 0.1
 @export var radius: float = 3.0
-@export_range(0.0, 2.0) var overflow_ratio: float = 1.0
-@export var max_extra_reach: float = 0.0
+@export_range(0.1, 3.0) var volume_ratio: float = 1.0
+@export var max_extra_reach: float = 100.0
+@export var diagonal_spread: bool = true
 
-@export_group("Mouvement")
+@export_group("Motion")
 @export var variation: float = 0.2
 @export var variation_speed: float = 1.2
 
-@export_group("Durées")
+@export_group("Durations")
 @export var grow_duration: float = 1.0
 @export var lifetime: float = 5.0
 @export var fade_duration: float = 1.5
@@ -21,9 +22,9 @@ class_name Smoke
 @export_flags_3d_physics var collision_mask: int = 0xFFFFFFFF
 @export var excluded_bodies: Array[CollisionObject3D] = []
 @export var wall_margin: float = 0.0
-@export var line_of_sight: bool = true
+@export var line_of_sight: bool = false
 
-@export_group("Rendu")
+@export_group("Rendering")
 @export var debug: bool = false
 @export var particles: GPUParticles3D
 @export var particle_update_interval: float = 0.1
@@ -31,7 +32,7 @@ class_name Smoke
 
 enum State { IDLE, GROWING, HOLDING, FADING }
 
-const DIRS: Array[Vector3i] = [
+const DIRS_6: Array[Vector3i] = [
 	Vector3i(1, 0, 0), Vector3i(-1, 0, 0),
 	Vector3i(0, 1, 0), Vector3i(0, -1, 0),
 	Vector3i(0, 0, 1), Vector3i(0, 0, -1),
@@ -43,6 +44,8 @@ var _life_time: float = 0.0
 
 var _positions: PackedVector3Array = PackedVector3Array()
 var _keys: PackedFloat32Array = PackedFloat32Array()
+var _max_key: float = 0.0
+var _extent: float = 0.0
 var _count: int = 0
 
 var _mmi: MultiMeshInstance3D
@@ -57,12 +60,10 @@ var _shape_q: PhysicsShapeQueryParameters3D
 var _ray_q: PhysicsRayQueryParameters3D
 var _los_q: PhysicsRayQueryParameters3D
 var _free_cache := {}
-var _visited := {}
-var _over_seen := {}
-var _queue: Array[Vector3i] = []
-var _phase2 := false
+var _neighbors: Array[Vector3i] = []
 var _hk: Array[float] = []
 var _hv: Array[Vector3i] = []
+var _pop_key: float = 0.0
 
 var _step: float:
 	get: return cell_size + gap
@@ -101,6 +102,18 @@ func start() -> void:
 	_state = State.GROWING
 
 
+func _build_neighbors() -> void:
+	_neighbors.clear()
+	if not diagonal_spread:
+		_neighbors.assign(DIRS_6)
+		return
+	for x in range(-1, 2):
+		for y in range(-1, 2):
+			for z in range(-1, 2):
+				if x != 0 or y != 0 or z != 0:
+					_neighbors.append(Vector3i(x, y, z))
+
+
 func _compute_cells() -> bool:
 	_space = get_world_3d().direct_space_state
 	_origin = global_position
@@ -131,122 +144,64 @@ func _compute_cells() -> bool:
 	_los_q.hit_back_faces = true
 
 	_free_cache.clear()
-	_visited.clear()
-	_over_seen.clear()
-	_queue.clear()
 	_hk.clear()
 	_hv.clear()
-	_phase2 = false
-
-	var all_dists := PackedFloat32Array()
-	var n_max := int(ceil(_rmax / _step))
-	for x in range(-n_max, n_max + 1):
-		for y in range(-n_max, n_max + 1):
-			for z in range(-n_max, n_max + 1):
-				var d := Vector3(x, y, z).length() * _step
-				if d <= _rmax:
-					all_dists.append(d)
-	all_dists.sort()
+	_build_neighbors()
 
 	if not _free(Vector3i.ZERO):
 		return false
 
-	var sphere: Array[Vector3i] = []
-	_queue.append(Vector3i.ZERO)
-	_visited[Vector3i.ZERO] = true
-	var head := 0
-	while head < _queue.size():
-		var c: Vector3i = _queue[head]
-		head += 1
-		sphere.append(c)
-		_explore(c)
+	var sphere_volume := (4.0 / 3.0) * PI * pow(radius, 3.0)
+	var budget := maxi(int(sphere_volume / pow(_step, 3.0) * volume_ratio), 1)
+	var reach_cap := radius + max_extra_reach
 
-	sphere.sort_custom(func(a: Vector3i, b: Vector3i): return Vector3(a).length_squared() < Vector3(b).length_squared())
+	var dist := {}
+	var closed := {}
+	var cells: Array[Vector3i] = []
+	var cell_keys: Array[float] = []
 
-	var sphere_dists := PackedFloat32Array()
-	for c in sphere:
-		sphere_dists.append(Vector3(c).length() * _step)
-	sphere_dists.sort()
+	dist[Vector3i.ZERO] = 0.0
+	_hpush(0.0, Vector3i.ZERO)
 
-	var missing_dists := PackedFloat32Array()
-	var j := 0
-	for d in all_dists:
-		if j < sphere_dists.size() and is_equal_approx(sphere_dists[j], d):
-			j += 1
-		else:
-			missing_dists.append(d)
-
-	var budget := int(round(missing_dists.size() * overflow_ratio))
-	var reach_max := _rmax + max_extra_reach
-	var extras: Array[Vector3i] = []
-	_phase2 = true
-	while budget > 0 and not _hk.is_empty():
+	while not _hk.is_empty() and cells.size() < budget:
 		var c := _hpop()
-		if Vector3(c).length() * _step > reach_max:
+		var k := _pop_key
+		if closed.has(c):
 			continue
-		if not _is_corner(c):
-			continue
-		extras.append(c)
-		budget -= 1
-		_explore(c)
+		if k > reach_cap:
+			break
+		closed[c] = true
+		cells.append(c)
+		cell_keys.append(k)
 
-	var all_cells: Array[Vector4] = []
-	for c in sphere:
-		var p := Vector3(c) * _step
-		all_cells.append(Vector4(p.x, p.y, p.z, p.length()))
-	for i in extras.size():
-		var p := Vector3(extras[i]) * _step
-		var key: float = missing_dists[mini(i, missing_dists.size() - 1)] if not missing_dists.is_empty() else p.length()
-		all_cells.append(Vector4(p.x, p.y, p.z, key))
+		for d in _neighbors:
+			var n := c + d
+			if closed.has(n):
+				continue
+			var nd := k + Vector3(d).length() * _step
+			if dist.has(n) and dist[n] <= nd:
+				continue
+			if not _free(n):
+				continue
+			if _wall_between(c, n):
+				continue
+			dist[n] = nd
+			_hpush(nd, n)
 
-	all_cells.sort_custom(func(a: Vector4, b: Vector4): return a.w < b.w)
-
-	_positions.resize(all_cells.size())
-	_keys.resize(all_cells.size())
-	for i in all_cells.size():
-		var v := all_cells[i]
-		_positions[i] = Vector3(v.x, v.y, v.z)
-		_keys[i] = v.w
+	_positions.resize(cells.size())
+	_keys.resize(cells.size())
+	_extent = 0.0
+	for i in cells.size():
+		var p := Vector3(cells[i]) * _step
+		_positions[i] = p
+		_keys[i] = cell_keys[i]
+		_extent = maxf(_extent, maxf(absf(p.x), maxf(absf(p.y), absf(p.z))))
+	_max_key = _keys[_keys.size() - 1] if not _keys.is_empty() else 0.0
 
 	_free_cache.clear()
-	_visited.clear()
-	_over_seen.clear()
-	_queue.clear()
 	_hk.clear()
 	_hv.clear()
 	return not _positions.is_empty()
-
-
-func _explore(c: Vector3i) -> void:
-	var adj := false
-	var pending: Array[Vector3i] = []
-
-	for d in DIRS:
-		var n := c + d
-		if _visited.has(n):
-			if not _free_cache.get(n, true):
-				adj = true
-			continue
-		if _over_seen.has(n):
-			continue
-		if not _free(n):
-			_visited[n] = true
-			adj = true
-			continue
-		if _wall_between(c, n):
-			adj = true
-			continue
-		if not _phase2 and Vector3(n).length() * _step <= _rmax:
-			_visited[n] = true
-			_queue.append(n)
-		else:
-			pending.append(n)
-
-	if adj:
-		for n in pending:
-			if not _over_seen.has(n):
-				_over_seen[n] = true
-				_hpush(Vector3(n).length_squared(), n)
 
 
 func _free(c: Vector3i) -> bool:
@@ -273,22 +228,6 @@ func _wall_between(a: Vector3i, b: Vector3i) -> bool:
 	return not _space.intersect_ray(_ray_q).is_empty()
 
 
-func _is_corner(c: Vector3i) -> bool:
-	var blocked_axes := 0
-	for axis in 3:
-		var axis_blocked := false
-		for sgn in [1, -1]:
-			var d := Vector3i.ZERO
-			d[axis] = sgn
-			var n := c + d
-			if not _free(n) or _wall_between(c, n):
-				axis_blocked = true
-				break
-		if axis_blocked:
-			blocked_axes += 1
-	return blocked_axes >= 2
-
-
 func _hpush(k: float, v: Vector3i) -> void:
 	_hk.append(k)
 	_hv.append(v)
@@ -304,6 +243,7 @@ func _hpush(k: float, v: Vector3i) -> void:
 
 func _hpop() -> Vector3i:
 	var top := _hv[0]
+	_pop_key = _hk[0]
 	var lk: float = _hk.pop_back()
 	var lv: Vector3i = _hv.pop_back()
 	var n := _hk.size()
@@ -357,7 +297,7 @@ func _start_particles() -> void:
 
 	var src := particles.process_material as ParticleProcessMaterial
 	if src == null:
-		push_warning("Smoke: l'emitter doit avoir un ParticleProcessMaterial.")
+		push_warning("Smoke: the emitter must have a ParticleProcessMaterial.")
 		return
 
 	if _particle_mat == null:
@@ -373,7 +313,7 @@ func _start_particles() -> void:
 	particles.local_coords = true
 	particles.global_transform = Transform3D(Basis.IDENTITY, global_position)
 
-	var reach := _rmax + max_extra_reach + _step * 2.0
+	var reach := _extent + _step * 2.0
 	particles.visibility_aabb = AABB(Vector3.ONE * -reach, Vector3.ONE * reach * 2.0)
 
 	_update_particle_points(1)
@@ -405,22 +345,22 @@ func _live_radius() -> float:
 	return radius + variation * s
 
 
-func _count_within(r: float) -> int:
-	if r <= 0.0:
+func _count_within(d: float) -> int:
+	if d <= 0.0:
 		return 0
 	var lo := 0
 	var hi := _keys.size()
 	while lo < hi:
 		var mid := (lo + hi) >> 1
-		if _keys[mid] <= r:
+		if _keys[mid] <= d:
 			lo = mid + 1
 		else:
 			hi = mid
 	return lo
 
 
-func _apply_radius(r: float, delta: float) -> void:
-	var n := _count_within(r)
+func _apply_ratio(ratio: float, delta: float) -> void:
+	var n := _keys.size() if ratio >= 1.0 else _count_within(_max_key * ratio)
 	if debug:
 		if _mmi:
 			_mmi.multimesh.visible_instance_count = n
@@ -438,25 +378,25 @@ func _process(delta: float) -> void:
 
 	_time += delta
 	_life_time += delta
-	var live := _live_radius()
+	var live_ratio := _live_radius() / _rmax
 
 	match _state:
 		State.GROWING:
 			var t := clampf(_time / grow_duration, 0.0, 1.0)
-			_apply_radius(live * smoothstep(0.0, 1.0, t), delta)
+			_apply_ratio(live_ratio * smoothstep(0.0, 1.0, t), delta)
 			if t >= 1.0:
 				_time = 0.0
 				_state = State.HOLDING
 
 		State.HOLDING:
-			_apply_radius(live, delta)
+			_apply_ratio(live_ratio, delta)
 			if _time >= lifetime:
 				_time = 0.0
 				_state = State.FADING
 
 		State.FADING:
 			var t := clampf(_time / fade_duration, 0.0, 1.0)
-			_apply_radius(live * (1.0 - t), delta)
+			_apply_ratio(live_ratio * (1.0 - t), delta)
 			if t >= 1.0:
 				_end()
 
@@ -469,5 +409,7 @@ func _end() -> void:
 		particles.emitting = false
 	_positions.clear()
 	_keys.clear()
+	_max_key = 0.0
+	_extent = 0.0
 	_count = 0
 	_state = State.IDLE
